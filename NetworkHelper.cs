@@ -10,6 +10,8 @@ namespace Snitch;
 
 public static class NetworkHelper
 {
+    private const uint ErrorInsufficientBuffer = 122;
+
     [DllImport("iphlpapi.dll", SetLastError = true)]
     private static extern uint GetExtendedTcpTable(
         IntPtr pTcpTable,
@@ -78,8 +80,13 @@ public static class NetworkHelper
         var connections = new List<TcpConnectionInfo>();
         int bufferSize = 0;
 
-        GetExtendedTcpTable(IntPtr.Zero, ref bufferSize, true, (int)AddressFamily.InterNetwork,
+        uint initialResult = GetExtendedTcpTable(IntPtr.Zero, ref bufferSize, true, (int)AddressFamily.InterNetwork,
             TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL);
+
+        if (initialResult != 0 && initialResult != ErrorInsufficientBuffer)
+        {
+            throw new Win32Exception((int)initialResult, "Failed to size TCP table buffer.");
+        }
 
         IntPtr tcpTablePtr = Marshal.AllocHGlobal(bufferSize);
 
@@ -90,7 +97,7 @@ public static class NetworkHelper
 
             if (result != 0)
             {
-                throw new Exception($"Failed to get TCP table. Error code: {result}");
+                throw new Win32Exception((int)result, "Failed to get TCP table.");
             }
 
             var table = Marshal.PtrToStructure<MIB_TCPTABLE_OWNER_PID>(tcpTablePtr);
@@ -129,7 +136,11 @@ public static class NetworkHelper
                         // Process has exited or module enumeration not available
                     }
                 }
-                catch
+                catch (ArgumentException)
+                {
+                    processName = $"PID:{row.owningPid}";
+                }
+                catch (InvalidOperationException)
                 {
                     processName = $"PID:{row.owningPid}";
                 }
@@ -142,9 +153,13 @@ public static class NetworkHelper
                         var hostEntry = Dns.GetHostEntry(remoteEndPoint.Address);
                         remoteHostName = hostEntry.HostName;
                     }
-                    catch
+                    catch (SocketException)
                     {
-                        // DNS lookup failed or timed out
+                        // DNS lookup failed
+                    }
+                    catch (ArgumentException)
+                    {
+                        // Invalid endpoint address
                     }
                 }
 
