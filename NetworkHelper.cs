@@ -57,6 +57,29 @@ public static class NetworkHelper
         public MIB_TCPROW_OWNER_PID[] table;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MIB_TCP6ROW_OWNER_PID
+    {
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+        public byte[] localAddr;
+        public uint localScopeId;
+        public uint localPort;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+        public byte[] remoteAddr;
+        public uint remoteScopeId;
+        public uint remotePort;
+        public uint state;
+        public int owningPid;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MIB_TCP6TABLE_OWNER_PID
+    {
+        public uint dwNumEntries;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 1)]
+        public MIB_TCP6ROW_OWNER_PID[] table;
+    }
+
     private enum MibTcpState
     {
         CLOSED = 1,
@@ -76,6 +99,15 @@ public static class NetworkHelper
     public static List<TcpConnectionInfo> GetAllTcpConnections()
     {
         var connections = new List<TcpConnectionInfo>();
+        connections.AddRange(GetIpv4TcpConnections());
+        connections.AddRange(GetIpv6TcpConnections());
+
+        return connections;
+    }
+
+    private static List<TcpConnectionInfo> GetIpv4TcpConnections()
+    {
+        var connections = new List<TcpConnectionInfo>();
         int bufferSize = 0;
 
         GetExtendedTcpTable(IntPtr.Zero, ref bufferSize, true, (int)AddressFamily.InterNetwork,
@@ -90,7 +122,7 @@ public static class NetworkHelper
 
             if (result != 0)
             {
-                throw new Exception($"Failed to get TCP table. Error code: {result}");
+                throw new Exception($"Failed to get IPv4 TCP table. Error code: {result}");
             }
 
             var table = Marshal.PtrToStructure<MIB_TCPTABLE_OWNER_PID>(tcpTablePtr);
@@ -100,53 +132,11 @@ public static class NetworkHelper
             for (int i = 0; i < table.dwNumEntries; i++)
             {
                 var row = Marshal.PtrToStructure<MIB_TCPROW_OWNER_PID>(rowPtr);
+                var localEndPoint = new IPEndPoint(new IPAddress(row.localAddr), (row.localPort1 << 8) + row.localPort2);
+                var remoteEndPoint = new IPEndPoint(new IPAddress(row.remoteAddr), (row.remotePort1 << 8) + row.remotePort2);
 
-                var localEndPoint = new IPEndPoint(
-                    new IPAddress(row.localAddr),
-                    (row.localPort1 << 8) + row.localPort2);
-
-                var remoteEndPoint = new IPEndPoint(
-                    new IPAddress(row.remoteAddr),
-                    (row.remotePort1 << 8) + row.remotePort2);
-
-                string processName = "Unknown";
-                string executablePath = string.Empty;
-                try
-                {
-                    var process = Process.GetProcessById(row.owningPid);
-                    processName = process.ProcessName;
-
-                    try
-                    {
-                        executablePath = process.MainModule?.FileName ?? string.Empty;
-                    }
-                    catch (Win32Exception)
-                    {
-                        // Access denied for some system processes
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        // Process has exited or module enumeration not available
-                    }
-                }
-                catch
-                {
-                    processName = $"PID:{row.owningPid}";
-                }
-
-                string remoteHostName = string.Empty;
-                if (remoteEndPoint.Address.ToString() != "0.0.0.0")
-                {
-                    try
-                    {
-                        var hostEntry = Dns.GetHostEntry(remoteEndPoint.Address);
-                        remoteHostName = hostEntry.HostName;
-                    }
-                    catch
-                    {
-                        // DNS lookup failed or timed out
-                    }
-                }
+                GetProcessDetails(row.owningPid, out var processName, out var executablePath);
+                var remoteHostName = ResolveRemoteHostName(remoteEndPoint.Address);
 
                 connections.Add(new TcpConnectionInfo
                 {
@@ -168,5 +158,116 @@ public static class NetworkHelper
         }
 
         return connections;
+    }
+
+    private static List<TcpConnectionInfo> GetIpv6TcpConnections()
+    {
+        var connections = new List<TcpConnectionInfo>();
+        int bufferSize = 0;
+
+        GetExtendedTcpTable(IntPtr.Zero, ref bufferSize, true, (int)AddressFamily.InterNetworkV6,
+            TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL);
+
+        IntPtr tcpTablePtr = Marshal.AllocHGlobal(bufferSize);
+
+        try
+        {
+            uint result = GetExtendedTcpTable(tcpTablePtr, ref bufferSize, true,
+                (int)AddressFamily.InterNetworkV6, TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL);
+
+            if (result != 0)
+            {
+                throw new Exception($"Failed to get IPv6 TCP table. Error code: {result}");
+            }
+
+            var table = Marshal.PtrToStructure<MIB_TCP6TABLE_OWNER_PID>(tcpTablePtr);
+            int rowSize = Marshal.SizeOf<MIB_TCP6ROW_OWNER_PID>();
+            IntPtr rowPtr = tcpTablePtr + Marshal.SizeOf<uint>();
+
+            for (int i = 0; i < table.dwNumEntries; i++)
+            {
+                var row = Marshal.PtrToStructure<MIB_TCP6ROW_OWNER_PID>(rowPtr);
+
+                var localAddress = new IPAddress(row.localAddr, row.localScopeId);
+                var remoteAddress = new IPAddress(row.remoteAddr, row.remoteScopeId);
+                var localEndPoint = new IPEndPoint(localAddress, ConvertNetworkPort(row.localPort));
+                var remoteEndPoint = new IPEndPoint(remoteAddress, ConvertNetworkPort(row.remotePort));
+
+                GetProcessDetails(row.owningPid, out var processName, out var executablePath);
+                var remoteHostName = ResolveRemoteHostName(remoteEndPoint.Address);
+
+                connections.Add(new TcpConnectionInfo
+                {
+                    ProcessId = row.owningPid,
+                    ProcessName = processName,
+                    ExecutablePath = executablePath,
+                    LocalEndPoint = localEndPoint,
+                    RemoteEndPoint = remoteEndPoint,
+                    RemoteHostName = remoteHostName,
+                    State = ((MibTcpState)row.state).ToString().Replace("_", " ")
+                });
+
+                rowPtr += rowSize;
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(tcpTablePtr);
+        }
+
+        return connections;
+    }
+
+    private static int ConvertNetworkPort(uint networkPort)
+    {
+        return (ushort)IPAddress.NetworkToHostOrder((short)(networkPort >> 16));
+    }
+
+    private static void GetProcessDetails(int processId, out string processName, out string executablePath)
+    {
+        processName = "Unknown";
+        executablePath = string.Empty;
+
+        try
+        {
+            var process = Process.GetProcessById(processId);
+            processName = process.ProcessName;
+
+            try
+            {
+                executablePath = process.MainModule?.FileName ?? string.Empty;
+            }
+            catch (Win32Exception)
+            {
+                // Access denied for some system processes
+            }
+            catch (InvalidOperationException)
+            {
+                // Process has exited or module enumeration not available
+            }
+        }
+        catch
+        {
+            processName = $"PID:{processId}";
+        }
+    }
+
+    private static string ResolveRemoteHostName(IPAddress remoteAddress)
+    {
+        if (remoteAddress.Equals(IPAddress.Any) || remoteAddress.Equals(IPAddress.IPv6Any))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var hostEntry = Dns.GetHostEntry(remoteAddress);
+            return hostEntry.HostName;
+        }
+        catch
+        {
+            // DNS lookup failed or timed out
+            return string.Empty;
+        }
     }
 }
