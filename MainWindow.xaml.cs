@@ -30,7 +30,14 @@ namespace Snitch
         {
             InitializeComponent();
             ViewModel = new MainViewModel();
+            Closed += OnClosed;
             _ = ViewModel.LoadConnectionsAsync();
+        }
+
+        private void OnClosed(object sender, WindowEventArgs args)
+        {
+            Closed -= OnClosed;
+            ViewModel.Dispose();
         }
     }
 }
