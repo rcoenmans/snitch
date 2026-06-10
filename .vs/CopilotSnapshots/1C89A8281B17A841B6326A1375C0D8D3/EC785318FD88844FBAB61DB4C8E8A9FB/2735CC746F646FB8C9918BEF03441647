@@ -1,0 +1,51 @@
+﻿using Microsoft.UI;
+using Microsoft.UI.Xaml.Media;
+
+namespace snitch2.ViewModels;
+
+public class ConnectionViewModel
+{
+    private static readonly SolidColorBrush GreenBrush = new(Colors.Green);
+    private static readonly SolidColorBrush BlueBrush = new(Colors.DodgerBlue);
+    private static readonly SolidColorBrush OrangeBrush = new(Colors.Orange);
+    private static readonly SolidColorBrush OrangeRedBrush = new(Colors.OrangeRed);
+    private static readonly SolidColorBrush YellowBrush = new(Colors.Yellow);
+    private static readonly SolidColorBrush RedBrush = new(Colors.Red);
+    private static readonly SolidColorBrush GrayBrush = new(Colors.Gray);
+
+    public string LocalEndPoint { get; }
+    public string RemoteEndPoint { get; }
+    public string RemoteHostName { get; }
+    public string State { get; }
+    public SolidColorBrush StateBrush { get; }
+
+    public ConnectionViewModel(TcpConnectionInfo connection)
+    {
+        LocalEndPoint = connection.LocalEndPoint.ToString();
+        RemoteEndPoint = connection.RemoteEndPoint.ToString();
+        RemoteHostName = string.IsNullOrEmpty(connection.RemoteHostName) 
+            ? "" 
+            : connection.RemoteHostName;
+        State = connection.State;
+        StateBrush = GetStateBrush(connection.State);
+    }
+
+    private static SolidColorBrush GetStateBrush(string state)
+    {
+        return state switch
+        {
+            "ESTAB" => new SolidColorBrush(Colors.Green),
+            "LISTEN" => new SolidColorBrush(Colors.DodgerBlue),
+            "TIME WAIT" => new SolidColorBrush(Colors.Orange),
+            "CLOSE WAIT" => new SolidColorBrush(Colors.OrangeRed),
+            "SYN SENT" => new SolidColorBrush(Colors.Yellow),
+            "SYN RCVD" => new SolidColorBrush(Colors.Yellow),
+            "FIN WAIT1" => new SolidColorBrush(Colors.Orange),
+            "FIN WAIT2" => new SolidColorBrush(Colors.Orange),
+            "CLOSING" => new SolidColorBrush(Colors.Red),
+            "LAST ACK" => new SolidColorBrush(Colors.Red),
+            "CLOSED" => new SolidColorBrush(Colors.Gray),
+            _ => new SolidColorBrush(Colors.Gray)
+        };
+    }
+}

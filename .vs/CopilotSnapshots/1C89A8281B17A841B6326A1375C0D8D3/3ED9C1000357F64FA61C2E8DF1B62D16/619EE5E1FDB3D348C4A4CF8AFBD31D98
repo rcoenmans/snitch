@@ -1,0 +1,28 @@
+﻿using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+
+namespace snitch2.ViewModels;
+
+public class ProcessGroupViewModel
+{
+    public int ProcessId { get; }
+    public string ProcessName { get; }
+    public string ProcessIdText { get; }
+    public string ExecutablePath { get; }
+    public string ConnectionCountText { get; }
+    public ObservableCollection<ConnectionViewModel> Connections { get; }
+
+    public ProcessGroupViewModel(List<TcpConnectionInfo> connections)
+    {
+        var first = connections.First();
+        ProcessId = first.ProcessId;
+        ProcessName = first.ProcessName;
+        ProcessIdText = $"PID: {first.ProcessId}";
+        ExecutablePath = first.ExecutablePath;
+        ConnectionCountText = $"{connections.Count} connection{(connections.Count != 1 ? "s" : "")}";
+
+        Connections = new ObservableCollection<ConnectionViewModel>(
+            connections.Select(c => new ConnectionViewModel(c)));
+    }
+}

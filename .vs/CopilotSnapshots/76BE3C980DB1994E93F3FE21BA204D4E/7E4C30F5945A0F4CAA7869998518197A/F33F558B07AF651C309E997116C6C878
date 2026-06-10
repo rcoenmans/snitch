@@ -1,0 +1,147 @@
+﻿using System;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+
+namespace Snitch.ViewModels;
+
+public partial class MainViewModel : ObservableObject, IDisposable
+{
+    private CancellationTokenSource? _autoRefreshCts;
+    private Task? _autoRefreshTask;
+
+    [ObservableProperty]
+    private ObservableCollection<ConnectionViewModel> connections = new();
+
+    [ObservableProperty]
+    private bool isLoading;
+
+    [ObservableProperty]
+    private int totalConnections;
+
+    [ObservableProperty]
+    private string statusMessage = "Ready";
+
+    [ObservableProperty]
+    private bool hideLocalConnections;
+
+    public MainViewModel()
+    {
+        StartAutoRefresh();
+    }
+
+    partial void OnHideLocalConnectionsChanged(bool value)
+    {
+        // Reload connections when filter changes
+        _ = LoadConnectionsAsync();
+    }
+
+    private void StartAutoRefresh()
+    {
+        _autoRefreshCts = new CancellationTokenSource();
+        _autoRefreshTask = AutoRefreshLoopAsync(_autoRefreshCts.Token);
+    }
+
+    private void StopAutoRefresh()
+    {
+        _autoRefreshCts?.Cancel();
+        _autoRefreshCts?.Dispose();
+        _autoRefreshCts = null;
+    }
+
+    private async Task AutoRefreshLoopAsync(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await LoadConnectionsAsync();
+                await Task.Delay(5000, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Error: {ex.Message}";
+                try
+                {
+                    await Task.Delay(5000, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    public async Task LoadConnectionsAsync()
+    {
+        IsLoading = true;
+        StatusMessage = "Loading connections...";
+
+        try
+        {
+            // Perform data retrieval on background thread
+            var connectionList = await Task.Run(() =>
+            {
+                return NetworkHelper.GetAllTcpConnections();
+            });
+
+            // Apply filter if enabled
+            if (HideLocalConnections)
+            {
+                connectionList = connectionList
+                    .Where(c => !IsLocalConnection(c))
+                    .ToList();
+            }
+
+            // Create ViewModels on UI thread (required for WinUI SolidColorBrush creation)
+            var viewModels = connectionList
+                .Select(c => new ConnectionViewModel(c))
+                .OrderBy(c => c.ProcessName)
+                .ThenBy(c => c.State)
+                .ToList();
+
+            Connections.Clear();
+            foreach (var vm in viewModels)
+            {
+                Connections.Add(vm);
+            }
+
+            TotalConnections = connectionList.Count;
+            StatusMessage = $"Last updated: {DateTime.Now:HH:mm:ss}";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private static bool IsLocalConnection(TcpConnectionInfo connection)
+    {
+        var remoteIp = connection.RemoteEndPoint.Address.ToString();
+
+        // Filter out 127.0.0.1 (localhost), 0.0.0.0 (unspecified), and ::1 (IPv6 localhost)
+        return remoteIp == "127.0.0.1" || 
+               remoteIp == "0.0.0.0" || 
+               remoteIp == "::1" ||
+               remoteIp.StartsWith("127.") ||
+               connection.LocalEndPoint.Address.ToString() == connection.RemoteEndPoint.Address.ToString();
+    }
+
+    public void Dispose()
+    {
+        StopAutoRefresh();
+        _autoRefreshTask?.Wait(TimeSpan.FromSeconds(2));
+    }
+}

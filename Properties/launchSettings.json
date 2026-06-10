@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "snitch2 (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "snitch2 (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

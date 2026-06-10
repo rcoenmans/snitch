@@ -1,0 +1,274 @@
+﻿using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+
+namespace Snitch;
+
+public static class NetworkHelper
+{
+    [DllImport("iphlpapi.dll", SetLastError = true)]
+    private static extern uint GetExtendedTcpTable(
+        IntPtr pTcpTable,
+        ref int dwOutBufLen,
+        bool sort,
+        int ipVersion,
+        TCP_TABLE_CLASS tblClass,
+        int reserved = 0);
+
+    private enum TCP_TABLE_CLASS
+    {
+        TCP_TABLE_BASIC_LISTENER,
+        TCP_TABLE_BASIC_CONNECTIONS,
+        TCP_TABLE_BASIC_ALL,
+        TCP_TABLE_OWNER_PID_LISTENER,
+        TCP_TABLE_OWNER_PID_CONNECTIONS,
+        TCP_TABLE_OWNER_PID_ALL,
+        TCP_TABLE_OWNER_MODULE_LISTENER,
+        TCP_TABLE_OWNER_MODULE_CONNECTIONS,
+        TCP_TABLE_OWNER_MODULE_ALL
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MIB_TCPROW_OWNER_PID
+    {
+        public uint state;
+        public uint localAddr;
+        public byte localPort1;
+        public byte localPort2;
+        public byte localPort3;
+        public byte localPort4;
+        public uint remoteAddr;
+        public byte remotePort1;
+        public byte remotePort2;
+        public byte remotePort3;
+        public byte remotePort4;
+        public int owningPid;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MIB_TCPTABLE_OWNER_PID
+    {
+        public uint dwNumEntries;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 1)]
+        public MIB_TCPROW_OWNER_PID[] table;
+    }
+
+    private enum MibTcpState
+    {
+        CLOSED = 1,
+        LISTEN = 2,
+        SYN_SENT = 3,
+        SYN_RCVD = 4,
+        ESTAB = 5,
+        FIN_WAIT1 = 6,
+        FIN_WAIT2 = 7,
+        CLOSE_WAIT = 8,
+        CLOSING = 9,
+        LAST_ACK = 10,
+        TIME_WAIT = 11,
+        DELETE_TCB = 12
+    }
+
+    private static (ulong bytesSent, ulong bytesReceived) GetTcpStatistics(MIB_TCPROW_OWNER_PID ownerRow)
+    {
+        var row = new MIB_TCPROW
+        {
+            state = ownerRow.state,
+            localAddr = ownerRow.localAddr,
+            localPort1 = ownerRow.localPort1,
+            localPort2 = ownerRow.localPort2,
+            localPort3 = ownerRow.localPort3,
+            localPort4 = ownerRow.localPort4,
+            remoteAddr = ownerRow.remoteAddr,
+            remotePort1 = ownerRow.remotePort1,
+            remotePort2 = ownerRow.remotePort2,
+            remotePort3 = ownerRow.remotePort3,
+            remotePort4 = ownerRow.remotePort4
+        };
+
+        // Try to enable statistics for this connection (requires admin)
+        TryEnableStatistics(ref row);
+
+        int size = Marshal.SizeOf<TCP_ESTATS_DATA_ROD_v0>();
+        IntPtr rod = Marshal.AllocHGlobal(size);
+
+        try
+        {
+            // Zero-initialize to ensure clean slate
+            for (int i = 0; i < size; i++)
+            {
+                Marshal.WriteByte(rod, i, 0);
+            }
+
+            uint result = GetPerTcpConnectionEStats(
+                ref row,
+                TCP_ESTATS_TYPE.TcpConnectionEstatsData,
+                IntPtr.Zero, 0, 0,
+                IntPtr.Zero, 0, 0,
+                rod, 0, (uint)size);
+
+            var localIp = new IPAddress(ownerRow.localAddr);
+            var localPort = (ownerRow.localPort1 << 8) + ownerRow.localPort2;
+            var remoteIp = new IPAddress(ownerRow.remoteAddr);
+            var remotePort = (ownerRow.remotePort1 << 8) + ownerRow.remotePort2;
+
+            if (result == 0)
+            {
+                var stats = Marshal.PtrToStructure<TCP_ESTATS_DATA_ROD_v0>(rod);
+                Debug.WriteLine($"SUCCESS: {localIp}:{localPort} -> {remoteIp}:{remotePort} | Out: {stats.DataBytesOut}, In: {stats.DataBytesIn}");
+                return (stats.DataBytesOut, stats.DataBytesIn);
+            }
+            else
+            {
+                Debug.WriteLine($"FAILED (code {result}): {localIp}:{localPort} -> {remoteIp}:{remotePort}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"EXCEPTION in GetTcpStatistics: {ex.Message}");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(rod);
+        }
+
+        return (0, 0);
+    }
+
+    private static void TryEnableStatistics(ref MIB_TCPROW row)
+    {
+        try
+        {
+            var rw = new TCP_ESTATS_DATA_RW_v0 { EnableCollection = 1 };
+            int size = Marshal.SizeOf<TCP_ESTATS_DATA_RW_v0>();
+            IntPtr rwPtr = Marshal.AllocHGlobal(size);
+
+            try
+            {
+                Marshal.StructureToPtr(rw, rwPtr, false);
+
+                // Try to enable statistics (will fail if not admin, but that's ok)
+                SetPerTcpConnectionEStats(
+                    ref row,
+                    TCP_ESTATS_TYPE.TcpConnectionEstatsData,
+                    rwPtr,
+                    0,
+                    (uint)size,
+                    0);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(rwPtr);
+            }
+        }
+        catch
+        {
+            // Silently fail - not running as admin or connection no longer exists
+        }
+    }
+
+    public static List<TcpConnectionInfo> GetAllTcpConnections()
+    {
+        var connections = new List<TcpConnectionInfo>();
+        int bufferSize = 0;
+
+        GetExtendedTcpTable(IntPtr.Zero, ref bufferSize, true, (int)AddressFamily.InterNetwork,
+            TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL);
+
+        IntPtr tcpTablePtr = Marshal.AllocHGlobal(bufferSize);
+
+        try
+        {
+            uint result = GetExtendedTcpTable(tcpTablePtr, ref bufferSize, true,
+                (int)AddressFamily.InterNetwork, TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL);
+
+            if (result != 0)
+            {
+                throw new Exception($"Failed to get TCP table. Error code: {result}");
+            }
+
+            var table = Marshal.PtrToStructure<MIB_TCPTABLE_OWNER_PID>(tcpTablePtr);
+            int rowSize = Marshal.SizeOf<MIB_TCPROW_OWNER_PID>();
+            IntPtr rowPtr = tcpTablePtr + Marshal.SizeOf<uint>();
+
+            for (int i = 0; i < table.dwNumEntries; i++)
+            {
+                var row = Marshal.PtrToStructure<MIB_TCPROW_OWNER_PID>(rowPtr);
+
+                var localEndPoint = new IPEndPoint(
+                    new IPAddress(row.localAddr),
+                    (row.localPort1 << 8) + row.localPort2);
+
+                var remoteEndPoint = new IPEndPoint(
+                    new IPAddress(row.remoteAddr),
+                    (row.remotePort1 << 8) + row.remotePort2);
+
+                string processName = "Unknown";
+                string executablePath = string.Empty;
+                try
+                {
+                    var process = Process.GetProcessById(row.owningPid);
+                    processName = process.ProcessName;
+
+                    try
+                    {
+                        executablePath = process.MainModule?.FileName ?? string.Empty;
+                    }
+                    catch (Win32Exception)
+                    {
+                        // Access denied for some system processes
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // Process has exited or module enumeration not available
+                    }
+                }
+                catch
+                {
+                    processName = $"PID:{row.owningPid}";
+                }
+
+                string remoteHostName = string.Empty;
+                if (remoteEndPoint.Address.ToString() != "0.0.0.0")
+                {
+                    try
+                    {
+                        var hostEntry = Dns.GetHostEntry(remoteEndPoint.Address);
+                        remoteHostName = hostEntry.HostName;
+                    }
+                    catch
+                    {
+                        // DNS lookup failed or timed out
+                    }
+                }
+
+                var (bytesSent, bytesReceived) = GetTcpStatistics(row);
+
+                connections.Add(new TcpConnectionInfo
+                {
+                    ProcessId = row.owningPid,
+                    ProcessName = processName,
+                    ExecutablePath = executablePath,
+                    LocalEndPoint = localEndPoint,
+                    RemoteEndPoint = remoteEndPoint,
+                    RemoteHostName = remoteHostName,
+                    State = ((MibTcpState)row.state).ToString().Replace("_", " "),
+                    BytesSent = bytesSent,
+                    BytesReceived = bytesReceived
+                });
+
+                rowPtr += rowSize;
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(tcpTablePtr);
+        }
+
+        return connections;
+    }
+}

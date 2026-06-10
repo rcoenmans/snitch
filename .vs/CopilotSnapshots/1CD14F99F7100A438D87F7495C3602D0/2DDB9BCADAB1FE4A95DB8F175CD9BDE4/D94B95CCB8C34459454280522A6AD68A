@@ -1,0 +1,71 @@
+﻿using System;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Threading.Tasks;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+
+namespace snitch2.ViewModels;
+
+public partial class MainViewModel : ObservableObject
+{
+    [ObservableProperty]
+    private ObservableCollection<ProcessGroupViewModel> processGroups = new();
+
+    [ObservableProperty]
+    private bool isLoading;
+
+    [ObservableProperty]
+    private int totalProcesses;
+
+    [ObservableProperty]
+    private int totalConnections;
+
+    [ObservableProperty]
+    private string statusMessage = "Ready";
+
+    [RelayCommand]
+    private async Task RefreshAsync()
+    {
+        await LoadConnectionsAsync();
+    }
+
+    public async Task LoadConnectionsAsync()
+    {
+        IsLoading = true;
+        StatusMessage = "Loading connections...";
+
+        try
+        {
+            await Task.Run(() =>
+            {
+                var connections = NetworkHelper.GetAllTcpConnections();
+
+                var groups = connections
+                    .GroupBy(conn => conn.ProcessId)
+                    .Select(g => new ProcessGroupViewModel(g.ToList()))
+                    .OrderBy(g => g.ProcessName)
+                    .ToList();
+
+                ProcessGroups.Clear();
+                foreach (var group in groups)
+                {
+                    ProcessGroups.Add(group);
+                }
+
+                TotalProcesses = groups.Count;
+                TotalConnections = connections.Count;
+            });
+
+            StatusMessage = $"Last updated: {DateTime.Now:HH:mm:ss}";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+}
