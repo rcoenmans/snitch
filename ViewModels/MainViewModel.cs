@@ -10,6 +10,7 @@ namespace Snitch.ViewModels;
 
 public partial class MainViewModel : ObservableObject, IDisposable
 {
+    private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private CancellationTokenSource? _autoRefreshCts;
     private Task? _autoRefreshTask;
 
@@ -82,11 +83,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public async Task LoadConnectionsAsync()
     {
-        IsLoading = true;
-        StatusMessage = "Loading connections...";
+        await _refreshLock.WaitAsync();
 
         try
         {
+            IsLoading = true;
+            StatusMessage = "Loading connections...";
+
             // Perform data retrieval on background thread
             var connectionList = await Task.Run(() =>
             {
@@ -124,6 +127,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         finally
         {
             IsLoading = false;
+            _refreshLock.Release();
         }
     }
 
@@ -143,5 +147,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         StopAutoRefresh();
         _autoRefreshTask?.Wait(TimeSpan.FromSeconds(2));
+        _refreshLock.Dispose();
     }
 }
