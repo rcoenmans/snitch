@@ -1,15 +1,20 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 
 namespace Snitch;
 
 public static class NetworkHelper
 {
+    private static readonly ConcurrentDictionary<IPAddress, string> DnsCache = new();
+    private static readonly TimeSpan DnsLookupTimeout = TimeSpan.FromMilliseconds(300);
+
     [DllImport("iphlpapi.dll", SetLastError = true)]
     private static extern uint GetExtendedTcpTable(
         IntPtr pTcpTable,
@@ -134,19 +139,7 @@ public static class NetworkHelper
                     processName = $"PID:{row.owningPid}";
                 }
 
-                string remoteHostName = string.Empty;
-                if (remoteEndPoint.Address.ToString() != "0.0.0.0")
-                {
-                    try
-                    {
-                        var hostEntry = Dns.GetHostEntry(remoteEndPoint.Address);
-                        remoteHostName = hostEntry.HostName;
-                    }
-                    catch
-                    {
-                        // DNS lookup failed or timed out
-                    }
-                }
+                string remoteHostName = ResolveRemoteHostName(remoteEndPoint.Address);
 
                 connections.Add(new TcpConnectionInfo
                 {
@@ -168,5 +161,44 @@ public static class NetworkHelper
         }
 
         return connections;
+    }
+
+    private static string ResolveRemoteHostName(IPAddress remoteAddress)
+    {
+        if (remoteAddress.Equals(IPAddress.Any))
+        {
+            return string.Empty;
+        }
+
+        if (DnsCache.TryGetValue(remoteAddress, out var cachedHostName))
+        {
+            return cachedHostName;
+        }
+
+        string hostName = string.Empty;
+
+        try
+        {
+            var lookupTask = Dns.GetHostEntryAsync(remoteAddress);
+            if (lookupTask.Wait(DnsLookupTimeout))
+            {
+                hostName = lookupTask.Result.HostName;
+            }
+        }
+        catch (SocketException)
+        {
+            hostName = string.Empty;
+        }
+        catch (TaskCanceledException)
+        {
+            hostName = string.Empty;
+        }
+        catch (AggregateException ex) when (ex.InnerException is SocketException or TaskCanceledException)
+        {
+            hostName = string.Empty;
+        }
+
+        DnsCache[remoteAddress] = hostName;
+        return hostName;
     }
 }
