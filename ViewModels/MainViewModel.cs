@@ -48,9 +48,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void StopAutoRefresh()
     {
-        _autoRefreshCts?.Cancel();
-        _autoRefreshCts?.Dispose();
+        var cts = _autoRefreshCts;
         _autoRefreshCts = null;
+
+        if (cts is null)
+        {
+            return;
+        }
+
+        cts.Cancel();
+        cts.Dispose();
     }
 
     private async Task AutoRefreshLoopAsync(CancellationToken cancellationToken)
@@ -147,6 +154,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         StopAutoRefresh();
         _autoRefreshTask?.Wait(TimeSpan.FromSeconds(2));
+        _autoRefreshTask = null;
         _refreshLock.Dispose();
     }
 }
