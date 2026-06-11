@@ -1,15 +1,21 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 
 namespace Snitch;
 
 public static class NetworkHelper
 {
+    private const uint ErrorInsufficientBuffer = 122;
+    private static readonly ConcurrentDictionary<IPAddress, string> DnsCache = new();
+    private static readonly TimeSpan DnsLookupTimeout = TimeSpan.FromMilliseconds(300);
+
     [DllImport("iphlpapi.dll", SetLastError = true)]
     private static extern uint GetExtendedTcpTable(
         IntPtr pTcpTable,
@@ -110,8 +116,13 @@ public static class NetworkHelper
         var connections = new List<TcpConnectionInfo>();
         int bufferSize = 0;
 
-        GetExtendedTcpTable(IntPtr.Zero, ref bufferSize, true, (int)AddressFamily.InterNetwork,
+        uint initialResult = GetExtendedTcpTable(IntPtr.Zero, ref bufferSize, true, (int)AddressFamily.InterNetwork,
             TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL);
+
+        if (initialResult != 0 && initialResult != ErrorInsufficientBuffer)
+        {
+            throw new Win32Exception((int)initialResult, "Failed to size TCP table buffer.");
+        }
 
         IntPtr tcpTablePtr = Marshal.AllocHGlobal(bufferSize);
 
@@ -122,7 +133,7 @@ public static class NetworkHelper
 
             if (result != 0)
             {
-                throw new Exception($"Failed to get IPv4 TCP table. Error code: {result}");
+                throw new Win32Exception((int)result, "Failed to get TCP table.");
             }
 
             var table = Marshal.PtrToStructure<MIB_TCPTABLE_OWNER_PID>(tcpTablePtr);
@@ -177,7 +188,7 @@ public static class NetworkHelper
 
             if (result != 0)
             {
-                throw new Exception($"Failed to get IPv6 TCP table. Error code: {result}");
+                throw new Win32Exception((int)result, "Failed to get IPv6 TCP table.");
             }
 
             var table = Marshal.PtrToStructure<MIB_TCP6TABLE_OWNER_PID>(tcpTablePtr);
@@ -259,15 +270,34 @@ public static class NetworkHelper
             return string.Empty;
         }
 
+        if (DnsCache.TryGetValue(remoteAddress, out var cachedHostName))
+        {
+            return cachedHostName;
+        }
+
+        string hostName = string.Empty;
+
         try
         {
-            var hostEntry = Dns.GetHostEntry(remoteAddress);
-            return hostEntry.HostName;
+            var lookupTask = Dns.GetHostEntryAsync(remoteAddress);
+            if (lookupTask.Wait(DnsLookupTimeout))
+            {
+                hostName = lookupTask.Result.HostName;
+            }
         }
-        catch
+        catch (SocketException)
         {
-            // DNS lookup failed or timed out
-            return string.Empty;
+            hostName = string.Empty;
         }
+        catch (TaskCanceledException)
+        {
+            hostName = string.Empty;
+        }
+        catch (AggregateException ex) when (ex.InnerException is SocketException or TaskCanceledException)
+        {
+            hostName = string.Empty;
+        }
+        DnsCache[remoteAddress] = hostName;
+        return hostName;
     }
 }
