@@ -13,12 +13,25 @@ namespace Snitch
     {
         public MainViewModel ViewModel { get; }
 
+        public bool IsDarkMode => ((FrameworkElement)Content).RequestedTheme == ElementTheme.Dark;
+
         public MainWindow()
         {
             InitializeComponent();
             ViewModel = new MainViewModel();
             Closed += OnClosed;
             _ = ViewModel.LoadConnectionsAsync();
+        }
+
+        private void OnThemeToggleClick(object sender, RoutedEventArgs e)
+        {
+            var root = (FrameworkElement)Content;
+            root.RequestedTheme = root.RequestedTheme == ElementTheme.Dark
+                ? ElementTheme.Light
+                : ElementTheme.Dark;
+
+            // Update icon: moon for dark mode, sun for light mode
+            ThemeIcon.Glyph = root.RequestedTheme == ElementTheme.Dark ? "\uE708" : "\uE706";
         }
 
         private void OnClosed(object sender, WindowEventArgs args)

@@ -44,6 +44,13 @@
                         <TextBlock Text="Internet Only" VerticalAlignment="Center"/>
                     </StackPanel>
                 </ToggleButton>
+                <ToggleButton
+                    x:Name="ThemeToggleButton"
+                    IsChecked="{x:Bind IsDarkMode, Mode=OneWay}"
+                    Click="OnThemeToggleClick"
+                    ToolTipService.ToolTip="Toggle dark mode">
+                    <FontIcon x:Name="ThemeIcon" Glyph="&#xE708;" FontFamily="{StaticResource SymbolThemeFontFamily}"/>
+                </ToggleButton>
                 <StackPanel>
                     <TextBlock Text="Total" FontSize="12" Opacity="0.7" HorizontalAlignment="Center"/>
                     <TextBlock Text="{x:Bind ViewModel.TotalConnections, Mode=OneWay}" FontSize="20" FontWeight="SemiBold"/>
