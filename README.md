@@ -1,5 +1,7 @@
 # Snitch
 
+![Snitch App Screen](Assets/AppScreen.png)
+
 Snitch is a Windows desktop tool that shows active TCP connections on your machine, grouped by process details and endpoint information.
 
 It is built with WinUI 3 and .NET 8, and refreshes connection data automatically every 5 seconds.
