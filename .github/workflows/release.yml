@@ -1,0 +1,74 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        platform: [x86, x64, ARM64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Decode signing certificate
+        run: |
+          $pfxBytes = [System.Convert]::FromBase64String("${{ secrets.SIGNING_CERTIFICATE }}")
+          $pfxPath = Join-Path $env:RUNNER_TEMP "snitch.pfx"
+          [System.IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+          Add-Content -Path $env:GITHUB_ENV -Value "PFX_PATH=$pfxPath"
+        shell: pwsh
+
+      - name: Build MSIX package
+        run: |
+          msbuild snitch.csproj `
+            /restore `
+            /p:Configuration=Release `
+            /p:Platform=${{ matrix.platform }} `
+            /p:GenerateAppxPackageOnBuild=true `
+            /p:AppxBundle=Never `
+            /p:AppxPackageSigningEnabled=true `
+            /p:PackageCertificateKeyFile="$env:PFX_PATH" `
+            /p:PackageCertificatePassword="${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}"
+        shell: pwsh
+
+      - name: Upload MSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: snitch-${{ matrix.platform }}
+          path: |
+            **/AppPackages/**/*.msix
+            **/AppPackages/**/*.cer
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.msix
+            artifacts/**/*.cer
+          generate_release_notes: true
