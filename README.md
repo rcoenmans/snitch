@@ -44,3 +44,7 @@ dotnet run --project .\snitch.csproj
 
 - Some system processes may not expose executable paths due to access restrictions.
 - Reverse DNS lookups are best-effort and may be empty for many endpoints.
+
+## Contributing
+
+See [CONTRIBUTE.md](./CONTRIBUTE.md) for contribution guidance.
