@@ -4,7 +4,7 @@ Snitch is a Windows desktop tool that shows active TCP connections on your machi
 
 ![Snitch App Screen](Assets/AppScreen.png)
 
-It is built with WinUI 3 and .NET 8, and refreshes connection data automatically every 5 seconds.
+It is built with WinUI 3 and .NET 10, and refreshes connection data automatically every 5 seconds.
 
 ## Features
 
@@ -17,7 +17,7 @@ It is built with WinUI 3 and .NET 8, and refreshes connection data automatically
 ## Requirements
 
 - Windows 10 (17763+) or Windows 11
-- .NET 8 SDK
+- .NET 10 SDK
 - Workloads/dependencies required for WinUI 3 desktop apps
 
 ## Build
