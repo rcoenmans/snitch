@@ -16,7 +16,6 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -79,66 +78,66 @@
         </Grid>
 
         <!-- Table Rows -->
-        <ListView Grid.Row="2"
-                  Background="{ThemeResource LayerFillColorDefaultBrush}"
-                  BorderThickness="0"
-                  SelectionMode="None"
-                  IsItemClickEnabled="False"
-                  ItemsSource="{x:Bind ViewModel.Connections, Mode=OneWay}">
-            <ListView.ItemTemplate>
-                <DataTemplate>
-                    <Border BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" 
-                           BorderThickness="0,0,0,1"
-                           Padding="16,8">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="180"/>
-                                <ColumnDefinition Width="70"/>
-                                <ColumnDefinition Width="90"/>
-                                <ColumnDefinition Width="180"/>
-                                <ColumnDefinition Width="180"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
+    <ScrollViewer Grid.Row="1" Margin="0,38,0,0" Background="{ThemeResource LayerFillColorDefaultBrush }">
+            <ItemsRepeater ItemsSource="{x:Bind ViewModel.Connections, Mode=OneWay}" Margin="16,0">
+                <ItemsRepeater.Layout>
+                    <StackLayout/>
+                </ItemsRepeater.Layout>
+                <ItemsRepeater.ItemTemplate>
+                    <DataTemplate>
+                        <Border BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" 
+                               BorderThickness="0,0,0,1"
+                               Padding="0,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="180"/>
+                                    <ColumnDefinition Width="70"/>
+                                    <ColumnDefinition Width="90"/>
+                                    <ColumnDefinition Width="180"/>
+                                    <ColumnDefinition Width="180"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
 
-                            <TextBlock Grid.Column="0" 
-                                      Text="{Binding ProcessName}" 
-                                      TextTrimming="CharacterEllipsis"
-                                      ToolTipService.ToolTip="{Binding ExecutablePath}"/>
+                                <TextBlock Grid.Column="0" 
+                                          Text="{Binding ProcessName}" 
+                                          TextTrimming="CharacterEllipsis"
+                                          ToolTipService.ToolTip="{Binding ExecutablePath}"/>
 
-                            <TextBlock Grid.Column="1" 
-                                      Text="{Binding ProcessId}" 
-                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <TextBlock Grid.Column="1" 
+                                          Text="{Binding ProcessId}" 
+                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
 
-                            <Border Grid.Column="2" 
-                                   Background="{Binding StateBrush}" 
-                                   CornerRadius="3" 
-                                   Padding="6,2"
-                                   HorizontalAlignment="Left">
-                                <TextBlock Text="{Binding State}" 
-                                          FontSize="11"
-                                          FontWeight="SemiBold"
-                                          Foreground="White"/>
-                            </Border>
+                                <Border Grid.Column="2" 
+                                       Background="{Binding StateBrush}" 
+                                       CornerRadius="3" 
+                                       Padding="6,2"
+                                       HorizontalAlignment="Left">
+                                    <TextBlock Text="{Binding State}" 
+                                              FontSize="11"
+                                              FontWeight="SemiBold"
+                                              Foreground="White"/>
+                                </Border>
 
-                            <TextBlock Grid.Column="3" 
-                                      Text="{Binding LocalEndPoint}" 
-                                      FontFamily="Consolas"
-                                      TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Grid.Column="3" 
+                                          Text="{Binding LocalEndPoint}" 
+                                          FontFamily="Consolas"
+                                          TextTrimming="CharacterEllipsis"/>
 
-                            <TextBlock Grid.Column="4" 
-                                      Text="{Binding RemoteEndPoint}" 
-                                      FontFamily="Consolas"
-                                      TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Grid.Column="4" 
+                                          Text="{Binding RemoteEndPoint}" 
+                                          FontFamily="Consolas"
+                                          TextTrimming="CharacterEllipsis"/>
 
-                            <TextBlock Grid.Column="5" 
-                                      Text="{Binding RemoteHostName}" 
-                                      FontFamily="Consolas"
-                                      TextTrimming="CharacterEllipsis"
-                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                        </Grid>
-                    </Border>
-                </DataTemplate>
-            </ListView.ItemTemplate>
-        </ListView>
+                                <TextBlock Grid.Column="5" 
+                                          Text="{Binding RemoteHostName}" 
+                                          FontFamily="Consolas"
+                                          TextTrimming="CharacterEllipsis"
+                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsRepeater.ItemTemplate>
+            </ItemsRepeater>
+        </ScrollViewer>
     </Grid>
 </Window>
