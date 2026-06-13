@@ -1,0 +1,57 @@
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Define gradients -->
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0078d4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e90ff;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="128" cy="128" r="128" fill="#f0f4f8"/>
+  
+  <!-- Eye (main focal point) -->
+  <g filter="url(#shadow)">
+    <!-- Outer eye circle -->
+    <circle cx="128" cy="90" r="35" fill="url(#grad1)" opacity="0.1"/>
+    <circle cx="128" cy="90" r="32" fill="none" stroke="url(#grad1)" stroke-width="3"/>
+    
+    <!-- Iris -->
+    <circle cx="128" cy="90" r="22" fill="url(#grad1)"/>
+    
+    <!-- Pupil -->
+    <circle cx="128" cy="90" r="12" fill="#001a4d"/>
+    
+    <!-- Shine/reflection -->
+    <circle cx="133" cy="82" r="5" fill="white" opacity="0.8"/>
+  </g>
+  
+  <!-- Network nodes/connections below eye -->
+  <g filter="url(#shadow)">
+    <!-- Central node -->
+    <circle cx="128" cy="160" r="10" fill="url(#grad1)"/>
+    
+    <!-- Left node -->
+    <circle cx="85" cy="180" r="8" fill="#0078d4" opacity="0.7"/>
+    
+    <!-- Right node -->
+    <circle cx="171" cy="180" r="8" fill="#0078d4" opacity="0.7"/>
+    
+    <!-- Bottom node -->
+    <circle cx="128" cy="210" r="8" fill="#0078d4" opacity="0.7"/>
+    
+    <!-- Connection lines -->
+    <line x1="128" y1="170" x2="85" y2="180" stroke="url(#grad1)" stroke-width="2" opacity="0.6"/>
+    <line x1="128" y1="170" x2="171" y2="180" stroke="url(#grad1)" stroke-width="2" opacity="0.6"/>
+    <line x1="128" y1="170" x2="128" y2="210" stroke="url(#grad1)" stroke-width="2" opacity="0.6"/>
+  </g>
+  
+  <!-- Decorative network indicator -->
+  <g opacity="0.5" stroke="url(#grad1)" stroke-width="1.5" fill="none" stroke-linecap="round">
+    <path d="M 105 145 Q 110 140 115 145"/>
+    <path d="M 141 145 Q 146 140 151 145"/>
+  </g>
+</svg>
