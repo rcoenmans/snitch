@@ -100,7 +100,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // Perform data retrieval on background thread
             var connectionList = await Task.Run(() =>
             {
-                return NetworkHelper.GetAllTcpConnections();
+                return NetworkHelper.GetAllTcpConnections(includeConnectionStats: true);
             });
 
             // Apply filter if enabled

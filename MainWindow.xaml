@@ -73,6 +73,8 @@
                 <ColumnDefinition Width="90"/>
                 <ColumnDefinition Width="180"/>
                 <ColumnDefinition Width="180"/>
+                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="120"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
@@ -81,7 +83,9 @@
             <TextBlock Grid.Column="2" Text="State" FontWeight="SemiBold"/>
             <TextBlock Grid.Column="3" Text="Local Endpoint" FontWeight="SemiBold"/>
             <TextBlock Grid.Column="4" Text="Remote Endpoint" FontWeight="SemiBold"/>
-            <TextBlock Grid.Column="5" Text="Remote Host" FontWeight="SemiBold"/>
+            <TextBlock Grid.Column="5" Text="TX" FontWeight="SemiBold"/>
+            <TextBlock Grid.Column="6" Text="RX" FontWeight="SemiBold"/>
+            <TextBlock Grid.Column="7" Text="Remote Host" FontWeight="SemiBold"/>
         </Grid>
 
         <!-- Table Rows -->
@@ -102,6 +106,8 @@
                                     <ColumnDefinition Width="90"/>
                                     <ColumnDefinition Width="180"/>
                                     <ColumnDefinition Width="180"/>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="120"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
 
@@ -115,14 +121,14 @@
                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
 
                                 <Border Grid.Column="2" 
-                                       Background="{Binding StateBrush}" 
-                                       CornerRadius="3" 
-                                       Padding="6,2"
-                                       HorizontalAlignment="Left">
-                                    <TextBlock Text="{Binding State}" 
-                                              FontSize="11"
-                                              FontWeight="SemiBold"
-                                              Foreground="White"/>
+                                        Background="{Binding StateBrush}" 
+                                        CornerRadius="3" 
+                                        Padding="6,2"
+                                        HorizontalAlignment="Left">
+                                     <TextBlock Text="{Binding State}" 
+                                               FontSize="11"
+                                               FontWeight="SemiBold"
+                                               Foreground="White"/>
                                 </Border>
 
                                 <TextBlock Grid.Column="3" 
@@ -136,6 +142,18 @@
                                           TextTrimming="CharacterEllipsis"/>
 
                                 <TextBlock Grid.Column="5" 
+                                          Text="{Binding BytesSentText}" 
+                                          FontFamily="Consolas"
+                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                          TextTrimming="CharacterEllipsis"/>
+
+                                <TextBlock Grid.Column="6" 
+                                          Text="{Binding BytesReceivedText}" 
+                                          FontFamily="Consolas"
+                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                          TextTrimming="CharacterEllipsis"/>
+
+                                <TextBlock Grid.Column="7" 
                                           Text="{Binding RemoteHostName}" 
                                           FontFamily="Consolas"
                                           TextTrimming="CharacterEllipsis"

@@ -20,6 +20,10 @@ public class ConnectionViewModel
     public string RemoteEndPoint { get; }
     public string RemoteHostName { get; }
     public string State { get; }
+    public long BytesSent { get; }
+    public long BytesReceived { get; }
+    public string BytesSentText { get; }
+    public string BytesReceivedText { get; }
     public SolidColorBrush StateBrush { get; }
 
     public ConnectionViewModel(TcpConnectionInfo connection)
@@ -33,7 +37,33 @@ public class ConnectionViewModel
             ? "" 
             : connection.RemoteHostName;
         State = connection.State;
+        BytesSent = connection.BytesSent;
+        BytesReceived = connection.BytesReceived;
+        BytesSentText = FormatBytes(connection.BytesSent);
+        BytesReceivedText = FormatBytes(connection.BytesReceived);
         StateBrush = GetStateBrush(connection.State);
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 0)
+        {
+            return "0 B";
+        }
+
+        string[] units = { "B", "KB", "MB", "GB", "TB" };
+        double value = bytes;
+        int unitIndex = 0;
+
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        return unitIndex == 0
+            ? $"{(long)value} {units[unitIndex]}"
+            : $"{value:0.##} {units[unitIndex]}";
     }
 
     private static SolidColorBrush GetStateBrush(string state)
