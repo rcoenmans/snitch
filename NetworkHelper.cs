@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Snitch;
@@ -13,8 +14,21 @@ namespace Snitch;
 public static class NetworkHelper
 {
     private const uint ErrorInsufficientBuffer = 122;
-    private static readonly ConcurrentDictionary<IPAddress, string> DnsCache = new();
+    private static readonly ConcurrentDictionary<IPAddress, DnsCacheEntry> DnsCache = new();
+    private static readonly ConcurrentDictionary<IPAddress, byte> PendingDnsLookups = new();
+    private static readonly SemaphoreSlim DnsLookupLimiter = new(8, 8);
+    private static readonly ConcurrentDictionary<int, ProcessCacheEntry> ProcessCache = new();
+
     private static readonly TimeSpan DnsLookupTimeout = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan DnsCacheTtl = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan DnsNegativeCacheTtl = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan ProcessCacheTtl = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ProcessNegativeCacheTtl = TimeSpan.FromSeconds(3);
+
+    private static int _processCacheSweepCounter;
+
+    private readonly record struct DnsCacheEntry(string HostName, DateTimeOffset ExpiresAtUtc);
+    private readonly record struct ProcessCacheEntry(string ProcessName, string ExecutablePath, DateTimeOffset ExpiresAtUtc);
 
     [DllImport("iphlpapi.dll", SetLastError = true)]
     private static extern uint GetExtendedTcpTable(
@@ -124,6 +138,11 @@ public static class NetworkHelper
             throw new Win32Exception((int)initialResult, "Failed to size TCP table buffer.");
         }
 
+        if (bufferSize <= 0)
+        {
+            return connections;
+        }
+
         IntPtr tcpTablePtr = Marshal.AllocHGlobal(bufferSize);
 
         try
@@ -137,11 +156,22 @@ public static class NetworkHelper
             }
 
             var table = Marshal.PtrToStructure<MIB_TCPTABLE_OWNER_PID>(tcpTablePtr);
+            if (table.dwNumEntries == 0)
+            {
+                return connections;
+            }
+
             int rowSize = Marshal.SizeOf<MIB_TCPROW_OWNER_PID>();
-            IntPtr rowPtr = tcpTablePtr + Marshal.SizeOf<uint>();
+            IntPtr rowPtr = IntPtr.Add(tcpTablePtr, Marshal.SizeOf<uint>());
+            long maxBytes = bufferSize - Marshal.SizeOf<uint>();
 
             for (int i = 0; i < table.dwNumEntries; i++)
             {
+                if (rowPtr.ToInt64() + rowSize > tcpTablePtr.ToInt64() + maxBytes)
+                {
+                    break;
+                }
+
                 var row = Marshal.PtrToStructure<MIB_TCPROW_OWNER_PID>(rowPtr);
                 var localEndPoint = new IPEndPoint(new IPAddress(row.localAddr), (row.localPort1 << 8) + row.localPort2);
                 var remoteEndPoint = new IPEndPoint(new IPAddress(row.remoteAddr), (row.remotePort1 << 8) + row.remotePort2);
@@ -176,8 +206,18 @@ public static class NetworkHelper
         var connections = new List<TcpConnectionInfo>();
         int bufferSize = 0;
 
-        GetExtendedTcpTable(IntPtr.Zero, ref bufferSize, true, (int)AddressFamily.InterNetworkV6,
+        uint initialResult = GetExtendedTcpTable(IntPtr.Zero, ref bufferSize, true, (int)AddressFamily.InterNetworkV6,
             TCP_TABLE_CLASS.TCP_TABLE_OWNER_PID_ALL);
+
+        if (initialResult != 0 && initialResult != ErrorInsufficientBuffer)
+        {
+            throw new Win32Exception((int)initialResult, "Failed to size IPv6 TCP table buffer.");
+        }
+
+        if (bufferSize <= 0)
+        {
+            return connections;
+        }
 
         IntPtr tcpTablePtr = Marshal.AllocHGlobal(bufferSize);
 
@@ -192,11 +232,22 @@ public static class NetworkHelper
             }
 
             var table = Marshal.PtrToStructure<MIB_TCP6TABLE_OWNER_PID>(tcpTablePtr);
+            if (table.dwNumEntries == 0)
+            {
+                return connections;
+            }
+
             int rowSize = Marshal.SizeOf<MIB_TCP6ROW_OWNER_PID>();
-            IntPtr rowPtr = tcpTablePtr + Marshal.SizeOf<uint>();
+            IntPtr rowPtr = IntPtr.Add(tcpTablePtr, Marshal.SizeOf<uint>());
+            long maxBytes = bufferSize - Marshal.SizeOf<uint>();
 
             for (int i = 0; i < table.dwNumEntries; i++)
             {
+                if (rowPtr.ToInt64() + rowSize > tcpTablePtr.ToInt64() + maxBytes)
+                {
+                    break;
+                }
+
                 var row = Marshal.PtrToStructure<MIB_TCP6ROW_OWNER_PID>(rowPtr);
 
                 var localAddress = new IPAddress(row.localAddr, row.localScopeId);
@@ -231,18 +282,29 @@ public static class NetworkHelper
 
     private static int ConvertNetworkPort(uint networkPort)
     {
-        return (ushort)IPAddress.NetworkToHostOrder((short)(networkPort >> 16));
+        return (ushort)IPAddress.NetworkToHostOrder((short)networkPort);
     }
 
     private static void GetProcessDetails(int processId, out string processName, out string executablePath)
     {
-        processName = "Unknown";
+        var now = DateTimeOffset.UtcNow;
+
+        if (ProcessCache.TryGetValue(processId, out var cached) && cached.ExpiresAtUtc > now)
+        {
+            processName = cached.ProcessName;
+            executablePath = cached.ExecutablePath;
+            return;
+        }
+
+        processName = $"PID:{processId}";
         executablePath = string.Empty;
+        var ttl = ProcessNegativeCacheTtl;
 
         try
         {
-            var process = Process.GetProcessById(processId);
+            using var process = Process.GetProcessById(processId);
             processName = process.ProcessName;
+            ttl = ProcessCacheTtl;
 
             try
             {
@@ -259,45 +321,99 @@ public static class NetworkHelper
         }
         catch
         {
-            processName = $"PID:{processId}";
+            // Keep fallback PID label
+        }
+
+        ProcessCache[processId] = new ProcessCacheEntry(processName, executablePath, now.Add(ttl));
+        SweepExpiredProcessCache(now);
+    }
+
+    private static void SweepExpiredProcessCache(DateTimeOffset now)
+    {
+        if (Interlocked.Increment(ref _processCacheSweepCounter) % 512 != 0)
+        {
+            return;
+        }
+
+        foreach (var cachedProcess in ProcessCache)
+        {
+            if (cachedProcess.Value.ExpiresAtUtc <= now)
+            {
+                ProcessCache.TryRemove(cachedProcess.Key, out _);
+            }
         }
     }
 
     private static string ResolveRemoteHostName(IPAddress remoteAddress)
     {
-        if (remoteAddress.Equals(IPAddress.Any) || remoteAddress.Equals(IPAddress.IPv6Any))
+        if (remoteAddress.Equals(IPAddress.Any)
+            || remoteAddress.Equals(IPAddress.IPv6Any)
+            || IPAddress.IsLoopback(remoteAddress))
         {
             return string.Empty;
         }
 
+        var now = DateTimeOffset.UtcNow;
         if (DnsCache.TryGetValue(remoteAddress, out var cachedHostName))
         {
-            return cachedHostName;
-        }
-
-        string hostName = string.Empty;
-
-        try
-        {
-            var lookupTask = Dns.GetHostEntryAsync(remoteAddress);
-            if (lookupTask.Wait(DnsLookupTimeout))
+            if (cachedHostName.ExpiresAtUtc > now)
             {
-                hostName = lookupTask.Result.HostName;
+                return cachedHostName.HostName;
             }
+
+            DnsCache.TryRemove(remoteAddress, out _);
         }
-        catch (SocketException)
+
+        QueueDnsLookup(remoteAddress);
+        return string.Empty;
+    }
+
+    private static void QueueDnsLookup(IPAddress remoteAddress)
+    {
+        if (!PendingDnsLookups.TryAdd(remoteAddress, 0))
         {
-            hostName = string.Empty;
+            return;
         }
-        catch (TaskCanceledException)
+
+        _ = Task.Run(async () =>
         {
-            hostName = string.Empty;
-        }
-        catch (AggregateException ex) when (ex.InnerException is SocketException or TaskCanceledException)
-        {
-            hostName = string.Empty;
-        }
-        DnsCache[remoteAddress] = hostName;
-        return hostName;
+            try
+            {
+                await DnsLookupLimiter.WaitAsync().ConfigureAwait(false);
+
+                try
+                {
+                    using var cts = new CancellationTokenSource(DnsLookupTimeout);
+                    var hostName = await ResolveHostNameAsync(remoteAddress, cts.Token).ConfigureAwait(false);
+                    DnsCache[remoteAddress] = new DnsCacheEntry(hostName, DateTimeOffset.UtcNow.Add(DnsCacheTtl));
+                }
+                catch (OperationCanceledException)
+                {
+                    DnsCache[remoteAddress] = new DnsCacheEntry(string.Empty, DateTimeOffset.UtcNow.Add(DnsNegativeCacheTtl));
+                }
+                catch (SocketException)
+                {
+                    DnsCache[remoteAddress] = new DnsCacheEntry(string.Empty, DateTimeOffset.UtcNow.Add(DnsNegativeCacheTtl));
+                }
+                catch
+                {
+                    DnsCache[remoteAddress] = new DnsCacheEntry(string.Empty, DateTimeOffset.UtcNow.Add(DnsNegativeCacheTtl));
+                }
+                finally
+                {
+                    DnsLookupLimiter.Release();
+                }
+            }
+            finally
+            {
+                PendingDnsLookups.TryRemove(remoteAddress, out _);
+            }
+        });
+    }
+
+    private static async Task<string> ResolveHostNameAsync(IPAddress remoteAddress, CancellationToken cancellationToken)
+    {
+        var hostEntry = await Dns.GetHostEntryAsync(remoteAddress).WaitAsync(cancellationToken).ConfigureAwait(false);
+        return hostEntry.HostName ?? string.Empty;
     }
 }
