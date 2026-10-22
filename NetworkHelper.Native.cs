@@ -1,5 +1,4 @@
 using System;
-using System.Buffers.Binary;
 using System.Net;
 using System.Runtime.InteropServices;
 
@@ -180,8 +179,7 @@ public static partial class NetworkHelper
 
     private static uint ConvertHostPortToNetworkOrder(int port)
     {
-        var networkPort = IPAddress.HostToNetworkOrder((short)port);
-        return (uint)(ushort)networkPort;
+        return (uint)IPAddress.HostToNetworkOrder((short)port);
     }
 
     private readonly record struct TcpConnectionStats(long BytesSent, long BytesReceived);
@@ -221,9 +219,9 @@ public static partial class NetworkHelper
         var row = new MIB_TCPROW
         {
             dwState = (uint)MibTcpState.ESTAB,
-            dwLocalAddr = BinaryPrimitives.ReadUInt32BigEndian(localAddressBytes),
+            dwLocalAddr = BitConverter.ToUInt32(localAddressBytes, 0),
             dwLocalPort = ConvertHostPortToNetworkOrder(localEndPoint.Port),
-            dwRemoteAddr = BinaryPrimitives.ReadUInt32BigEndian(remoteAddressBytes),
+            dwRemoteAddr = BitConverter.ToUInt32(remoteAddressBytes, 0),
             dwRemotePort = ConvertHostPortToNetworkOrder(remoteEndPoint.Port)
         };
 

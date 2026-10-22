@@ -151,7 +151,7 @@ public static partial class NetworkHelper
 
     private static int ConvertNetworkPort(uint networkPort)
     {
-        return (ushort)IPAddress.NetworkToHostOrder((short)(networkPort >> 16));
+        return (ushort)IPAddress.NetworkToHostOrder((short)networkPort);
     }
 
     private static void GetProcessDetails(int processId, out string processName, out string executablePath)
