@@ -5,7 +5,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 
 namespace Snitch.ViewModels;
 
@@ -13,6 +12,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private readonly Dictionary<string, (long BytesSent, long BytesReceived)> _lastConnectionTotals = new();
+    private readonly Dictionary<string, ConnectionViewModel> _connectionMap = new(StringComparer.Ordinal);
     private CancellationTokenSource? _autoRefreshCts;
     private Task? _autoRefreshTask;
 
@@ -115,7 +115,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             foreach (var connection in connectionList)
             {
-                var key = GetConnectionKey(connection);
+                var key = ConnectionViewModel.BuildKey(connection);
                 var lifetimeSent = connection.BytesSent;
                 var lifetimeReceived = connection.BytesReceived;
 
@@ -137,7 +137,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             var staleKeys = _lastConnectionTotals.Keys
-                .Except(connectionList.Select(GetConnectionKey))
+                .Except(connectionList.Select(ConnectionViewModel.BuildKey))
                 .ToList();
 
             foreach (var staleKey in staleKeys)
@@ -145,20 +145,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 _lastConnectionTotals.Remove(staleKey);
             }
 
-            // Create ViewModels on UI thread (required for WinUI SolidColorBrush creation)
-            var viewModels = connectionList
-                .Select(c => new ConnectionViewModel(c))
-                .OrderBy(c => c.ProcessName)
-                .ThenBy(c => c.State)
+            var sortedConnections = connectionList
+                .OrderBy(c => c.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(c => c.State, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(c => c.ProcessId)
+                .ThenBy(c => c.LocalEndPoint.ToString(), StringComparer.Ordinal)
+                .ThenBy(c => c.RemoteEndPoint.ToString(), StringComparer.Ordinal)
                 .ToList();
 
-            Connections.Clear();
-            foreach (var vm in viewModels)
-            {
-                Connections.Add(vm);
-            }
+            ApplyConnectionDiff(sortedConnections);
 
-            TotalConnections = connectionList.Count;
+            TotalConnections = sortedConnections.Count;
             StatusMessage = $"Last updated: {DateTime.Now:HH:mm:ss}";
         }
         catch (Exception ex)
@@ -172,9 +169,54 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private static string GetConnectionKey(TcpConnectionInfo connection)
+    private void ApplyConnectionDiff(IReadOnlyList<TcpConnectionInfo> sortedConnections)
     {
-        return $"{connection.ProcessId}:{connection.LocalEndPoint}:{connection.RemoteEndPoint}";
+        var desiredKeys = new HashSet<string>(
+            sortedConnections.Select(ConnectionViewModel.BuildKey),
+            StringComparer.Ordinal);
+
+        for (int i = Connections.Count - 1; i >= 0; i--)
+        {
+            var existing = Connections[i];
+            if (desiredKeys.Contains(existing.Key))
+            {
+                continue;
+            }
+
+            Connections.RemoveAt(i);
+            _connectionMap.Remove(existing.Key);
+        }
+
+        for (int targetIndex = 0; targetIndex < sortedConnections.Count; targetIndex++)
+        {
+            var connection = sortedConnections[targetIndex];
+            var key = ConnectionViewModel.BuildKey(connection);
+
+            if (_connectionMap.TryGetValue(key, out var vm))
+            {
+                if (vm.NeedsUpdate(connection))
+                {
+                    vm.Update(connection);
+                }
+
+                var currentIndex = Connections.IndexOf(vm);
+                if (currentIndex >= 0 && currentIndex != targetIndex)
+                {
+                    var clampedTargetIndex = Math.Clamp(targetIndex, 0, Math.Max(0, Connections.Count - 1));
+                    if (currentIndex != clampedTargetIndex)
+                    {
+                        Connections.Move(currentIndex, clampedTargetIndex);
+                    }
+                }
+
+                continue;
+            }
+
+            var created = new ConnectionViewModel(connection);
+            var insertIndex = Math.Clamp(targetIndex, 0, Connections.Count);
+            Connections.Insert(insertIndex, created);
+            _connectionMap[key] = created;
+        }
     }
 
     private static bool IsLocalConnection(TcpConnectionInfo connection)
@@ -194,6 +236,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         StopAutoRefresh();
         _autoRefreshTask?.Wait(TimeSpan.FromSeconds(2));
         _autoRefreshTask = null;
+        _connectionMap.Clear();
         _refreshLock.Dispose();
     }
 }
