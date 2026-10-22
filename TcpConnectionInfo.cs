@@ -11,4 +11,8 @@ public class TcpConnectionInfo
     public IPEndPoint RemoteEndPoint { get; set; } = null!;
     public string RemoteHostName { get; set; } = string.Empty;
     public string State { get; set; } = string.Empty;
+    public long LifetimeBytesSent { get; set; }
+    public long LifetimeBytesReceived { get; set; }
+    public long BytesSent { get; set; }
+    public long BytesReceived { get; set; }
 }

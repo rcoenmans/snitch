@@ -21,6 +21,10 @@ public class ConnectionViewModel : ObservableObject
     private string _remoteEndPoint = string.Empty;
     private string _remoteHostName = string.Empty;
     private string _state = string.Empty;
+    private long _bytesSent;
+    private long _bytesReceived;
+    private string _bytesSentText = string.Empty;
+    private string _bytesReceivedText = string.Empty;
     private SolidColorBrush _stateBrush = GrayBrush;
 
     public string Key { get; }
@@ -67,6 +71,30 @@ public class ConnectionViewModel : ObservableObject
         private set => SetProperty(ref _state, value);
     }
 
+    public long BytesSent
+    {
+        get => _bytesSent;
+        private set => SetProperty(ref _bytesSent, value);
+    }
+
+    public long BytesReceived
+    {
+        get => _bytesReceived;
+        private set => SetProperty(ref _bytesReceived, value);
+    }
+
+    public string BytesSentText
+    {
+        get => _bytesSentText;
+        private set => SetProperty(ref _bytesSentText, value);
+    }
+
+    public string BytesReceivedText
+    {
+        get => _bytesReceivedText;
+        private set => SetProperty(ref _bytesReceivedText, value);
+    }
+
     public SolidColorBrush StateBrush
     {
         get => _stateBrush;
@@ -92,7 +120,9 @@ public class ConnectionViewModel : ObservableObject
             || LocalEndPoint != connection.LocalEndPoint.ToString()
             || RemoteEndPoint != connection.RemoteEndPoint.ToString()
             || RemoteHostName != connection.RemoteHostName
-            || State != connection.State;
+            || State != connection.State
+            || BytesSent != connection.BytesSent
+            || BytesReceived != connection.BytesReceived;
     }
 
     public void Update(TcpConnectionInfo connection)
@@ -106,7 +136,33 @@ public class ConnectionViewModel : ObservableObject
             ? string.Empty
             : connection.RemoteHostName;
         State = connection.State;
+        BytesSent = connection.BytesSent;
+        BytesReceived = connection.BytesReceived;
+        BytesSentText = FormatBytes(connection.BytesSent);
+        BytesReceivedText = FormatBytes(connection.BytesReceived);
         StateBrush = GetStateBrush(connection.State);
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 0)
+        {
+            return "0 B";
+        }
+
+        string[] units = { "B", "KB", "MB", "GB", "TB" };
+        double value = bytes;
+        int unitIndex = 0;
+
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        return unitIndex == 0
+            ? $"{(long)value} {units[unitIndex]}"
+            : $"{value:0.##} {units[unitIndex]}";
     }
 
     private static SolidColorBrush GetStateBrush(string state)

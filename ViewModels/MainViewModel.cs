@@ -11,6 +11,7 @@ namespace Snitch.ViewModels;
 public partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
+    private readonly Dictionary<string, (long BytesSent, long BytesReceived)> _lastConnectionTotals = new();
     private readonly Dictionary<string, ConnectionViewModel> _connectionMap = new(StringComparer.Ordinal);
     private CancellationTokenSource? _autoRefreshCts;
     private Task? _autoRefreshTask;
@@ -101,7 +102,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // Perform data retrieval on background thread
             var connectionList = await Task.Run(() =>
             {
-                return NetworkHelper.GetAllTcpConnections();
+                return NetworkHelper.GetAllTcpConnections(includeConnectionStats: true);
             });
 
             // Apply filter if enabled
@@ -110,6 +111,38 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 connectionList = connectionList
                     .Where(c => !IsLocalConnection(c))
                     .ToList();
+            }
+
+            foreach (var connection in connectionList)
+            {
+                var key = ConnectionViewModel.BuildKey(connection);
+                var lifetimeSent = connection.BytesSent;
+                var lifetimeReceived = connection.BytesReceived;
+
+                connection.LifetimeBytesSent = lifetimeSent;
+                connection.LifetimeBytesReceived = lifetimeReceived;
+
+                if (_lastConnectionTotals.TryGetValue(key, out var previous))
+                {
+                    connection.BytesSent = Math.Max(0, lifetimeSent - previous.BytesSent);
+                    connection.BytesReceived = Math.Max(0, lifetimeReceived - previous.BytesReceived);
+                }
+                else
+                {
+                    connection.BytesSent = 0;
+                    connection.BytesReceived = 0;
+                }
+
+                _lastConnectionTotals[key] = (lifetimeSent, lifetimeReceived);
+            }
+
+            var staleKeys = _lastConnectionTotals.Keys
+                .Except(connectionList.Select(ConnectionViewModel.BuildKey))
+                .ToList();
+
+            foreach (var staleKey in staleKeys)
+            {
+                _lastConnectionTotals.Remove(staleKey);
             }
 
             var sortedConnections = connectionList
