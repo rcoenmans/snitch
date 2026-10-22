@@ -90,59 +90,47 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public async Task LoadConnectionsAsync()
+    public Task LoadConnectionsAsync()
+    {
+        return LoadConnectionsInternalAsync(includeConnectionStats: false);
+    }
+
+    private async Task LoadConnectionsInternalAsync(bool includeConnectionStats)
     {
         await _refreshLock.WaitAsync();
 
         try
         {
             IsLoading = true;
-            StatusMessage = "Loading connections...";
+            StatusMessage = includeConnectionStats
+                ? "Refreshing connection details..."
+                : "Loading connections...";
 
-            // Perform data retrieval on background thread
             var connectionList = await Task.Run(() =>
             {
-                return NetworkHelper.GetAllTcpConnections(includeConnectionStats: true);
+                var allConnections = NetworkHelper.GetAllTcpConnections(includeConnectionStats);
+
+                if (HideLocalConnections)
+                {
+                    allConnections = allConnections
+                        .Where(c => !IsLocalConnection(c))
+                        .ToList();
+                }
+
+                return allConnections;
             });
 
-            // Apply filter if enabled
-            if (HideLocalConnections)
+            if (includeConnectionStats)
             {
-                connectionList = connectionList
-                    .Where(c => !IsLocalConnection(c))
-                    .ToList();
+                UpdateConnectionRateInfo(connectionList);
             }
-
-            foreach (var connection in connectionList)
+            else
             {
-                var key = ConnectionViewModel.BuildKey(connection);
-                var lifetimeSent = connection.BytesSent;
-                var lifetimeReceived = connection.BytesReceived;
-
-                connection.LifetimeBytesSent = lifetimeSent;
-                connection.LifetimeBytesReceived = lifetimeReceived;
-
-                if (_lastConnectionTotals.TryGetValue(key, out var previous))
-                {
-                    connection.BytesSent = Math.Max(0, lifetimeSent - previous.BytesSent);
-                    connection.BytesReceived = Math.Max(0, lifetimeReceived - previous.BytesReceived);
-                }
-                else
+                foreach (var connection in connectionList)
                 {
                     connection.BytesSent = 0;
                     connection.BytesReceived = 0;
                 }
-
-                _lastConnectionTotals[key] = (lifetimeSent, lifetimeReceived);
-            }
-
-            var staleKeys = _lastConnectionTotals.Keys
-                .Except(connectionList.Select(ConnectionViewModel.BuildKey))
-                .ToList();
-
-            foreach (var staleKey in staleKeys)
-            {
-                _lastConnectionTotals.Remove(staleKey);
             }
 
             var sortedConnections = connectionList
@@ -156,7 +144,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ApplyConnectionDiff(sortedConnections);
 
             TotalConnections = sortedConnections.Count;
-            StatusMessage = $"Last updated: {DateTime.Now:HH:mm:ss}";
+
+            if (includeConnectionStats)
+            {
+                StatusMessage = $"Last updated: {DateTime.Now:HH:mm:ss}";
+            }
+            else
+            {
+                StatusMessage = $"Showing {TotalConnections} connection{(TotalConnections == 1 ? string.Empty : "s")}";
+                _ = LoadConnectionsInternalAsync(includeConnectionStats: true);
+            }
         }
         catch (Exception ex)
         {
@@ -166,6 +163,41 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             IsLoading = false;
             _refreshLock.Release();
+        }
+    }
+
+    private void UpdateConnectionRateInfo(IReadOnlyCollection<TcpConnectionInfo> connectionList)
+    {
+        foreach (var connection in connectionList)
+        {
+            var key = ConnectionViewModel.BuildKey(connection);
+            var lifetimeSent = connection.BytesSent;
+            var lifetimeReceived = connection.BytesReceived;
+
+            connection.LifetimeBytesSent = lifetimeSent;
+            connection.LifetimeBytesReceived = lifetimeReceived;
+
+            if (_lastConnectionTotals.TryGetValue(key, out var previous))
+            {
+                connection.BytesSent = Math.Max(0, lifetimeSent - previous.BytesSent);
+                connection.BytesReceived = Math.Max(0, lifetimeReceived - previous.BytesReceived);
+            }
+            else
+            {
+                connection.BytesSent = 0;
+                connection.BytesReceived = 0;
+            }
+
+            _lastConnectionTotals[key] = (lifetimeSent, lifetimeReceived);
+        }
+
+        var staleKeys = _lastConnectionTotals.Keys
+            .Except(connectionList.Select(ConnectionViewModel.BuildKey))
+            .ToList();
+
+        foreach (var staleKey in staleKeys)
+        {
+            _lastConnectionTotals.Remove(staleKey);
         }
     }
 

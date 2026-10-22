@@ -119,10 +119,11 @@
                                         <ColumnDefinition Width="*" MinWidth="100"/>
                                     </Grid.ColumnDefinitions>
 
-                                    <TextBlock Grid.Column="0" 
-                                                Text="{Binding ProcessName}" 
-                                                TextTrimming="CharacterEllipsis"
-                                                ToolTipService.ToolTip="{Binding ExecutablePath}"/>
+                                    <Grid Grid.Column="0">
+                                        <TextBlock Text="{Binding ProcessName}" 
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTipService.ToolTip="{Binding ExecutablePath, Converter={StaticResource NonEmptyStringTooltipConverter}}"/>
+                                    </Grid>
 
                                     <TextBlock Grid.Column="1" 
                                                 Text="{Binding ProcessId}" 
